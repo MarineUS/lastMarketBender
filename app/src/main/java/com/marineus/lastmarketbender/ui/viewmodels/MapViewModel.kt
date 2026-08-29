@@ -1,6 +1,8 @@
 package com.marineus.lastmarketbender.ui.viewmodels
 
 import android.app.Application
+import android.content.Context
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -14,6 +16,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
 
 class MapViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: PinRepository
@@ -25,7 +29,8 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     var userLocation by mutableStateOf<LatLng?>(null)
         private set
 
-    var isDarkMode by mutableStateOf(false)
+    private val sharedPrefs = application.getSharedPreferences("map_prefs", Context.MODE_PRIVATE)
+    var isDarkMode by mutableStateOf(sharedPrefs.getBoolean("is_dark_mode", false))
         private set
 
     init {
@@ -48,6 +53,26 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleDarkMode() {
         isDarkMode = !isDarkMode
+        sharedPrefs.edit().putBoolean("is_dark_mode", isDarkMode).apply()
+    }
+
+    fun saveImageToInternalStorage(uri: Uri): String? {
+        return try {
+            val context = getApplication<Application>().applicationContext
+            val inputStream = context.contentResolver.openInputStream(uri)
+            val fileName = "pin_image_${System.currentTimeMillis()}.jpg"
+            val file = File(context.filesDir, fileName)
+            val outputStream = FileOutputStream(file)
+            inputStream?.use { input ->
+                outputStream.use { output ->
+                    input.copyTo(output)
+                }
+            }
+            file.absolutePath
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
     }
 
     fun addPin(latLng: LatLng) {
@@ -69,16 +94,9 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
             repository.update(pin)
         }
     }
-    
-    fun deletePin(pin: MarketPin) {
-        viewModelScope.launch {
-            repository.delete(pin)
-        }
-    }
 
     fun deletePinById(id: Int) {
         viewModelScope.launch {
-            // Mevcut pins listesinden ID'ye göre bulup sil
             pins.value.find { it.id == id }?.let { pin ->
                 repository.delete(pin)
             }

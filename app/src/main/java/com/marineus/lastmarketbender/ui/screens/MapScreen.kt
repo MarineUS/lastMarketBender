@@ -256,6 +256,9 @@ fun MapScreen(viewModel: MapViewModel) {
                         onClose = {
                             showSheet = false
                             selectedPinId = null
+                        },
+                        onSaveImage = { uri ->
+                            viewModel.saveImageToInternalStorage(uri)
                         }
                     )
                 }
@@ -338,7 +341,8 @@ fun PinDetailsEditor(
     pin: MarketPin,
     onUpdate: (MarketPin) -> Unit,
     onDelete: () -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    onSaveImage: (Uri) -> String?
 ) {
     var isEditing by remember { mutableStateOf(false) }
     
@@ -351,7 +355,8 @@ fun PinDetailsEditor(
         contract = ActivityResultContracts.PickMultipleVisualMedia(),
         onResult = { uris ->
             if (uris.isNotEmpty()) {
-                imagePaths = imagePaths + uris.map { it.toString() }
+                val internalPaths = uris.mapNotNull { onSaveImage(it) }
+                imagePaths = imagePaths + internalPaths
             }
         }
     )
