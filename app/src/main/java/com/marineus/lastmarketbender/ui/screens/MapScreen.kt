@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import java.io.OutputStreamWriter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -375,6 +376,7 @@ fun MapScreen(viewModel: MapViewModel) {
                 sheetState = statsSheetState
             ) {
                 DashboardContent(
+                    viewModel = viewModel,
                     pins = pins,
                     onClose = { showStatsSheet = false }
                 )
@@ -388,11 +390,31 @@ fun MapScreen(viewModel: MapViewModel) {
                 .align(Alignment.TopEnd)
                 .padding(top = 48.dp, end = 16.dp)
                 .size(48.dp),
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
+            containerColor = if (viewModel.isOnline) MaterialTheme.colorScheme.primary else Color.Gray,
+            contentColor = Color.White,
             elevation = FloatingActionButtonDefaults.elevation(4.dp)
         ) {
             Icon(Icons.Default.Dashboard, contentDescription = "Dashboard")
+        }
+
+        // Offline Badge
+        if (!viewModel.isOnline) {
+            Card(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 56.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.Red.copy(alpha = 0.8f)),
+                shape = CircleShape
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.CloudOff, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Çevrimdışı Mod", color = Color.White, style = MaterialTheme.typography.labelMedium)
+                }
+            }
         }
 
         // Modern Custom Controls
@@ -1217,9 +1239,44 @@ fun PinListContent(
 @SuppressLint("DefaultLocale")
 @Composable
 fun DashboardContent(
+    viewModel: MapViewModel,
     pins: List<MarketPin>,
     onClose: () -> Unit
 ) {
+    val context = LocalContext.current
+    
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+        onResult = { uri ->
+            uri?.let {
+                try {
+                    val json = viewModel.exportDataToJson()
+                    context.contentResolver.openOutputStream(it)?.use { stream ->
+                        OutputStreamWriter(stream).use { writer ->
+                            writer.write(json)
+                        }
+                    }
+                    Toast.makeText(context, "Yedekleme başarılı!", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Hata: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    )
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri ->
+            uri?.let {
+                viewModel.importDataFromJson(
+                    uri = it,
+                    onSuccess = { Toast.makeText(context, "Veriler başarıyla içe aktarıldı!", Toast.LENGTH_SHORT).show() },
+                    onError = { error -> Toast.makeText(context, "Hata: $error", Toast.LENGTH_LONG).show() }
+                )
+            }
+        }
+    )
+
     val totalPins = pins.size
     val marketCount = pins.count { it.type == BusinessType.MARKET }
     val kafeCount = pins.count { it.type == BusinessType.KAFE }
@@ -1302,6 +1359,55 @@ fun DashboardContent(
         DetailRow(Icons.Default.PhotoLibrary, "Toplam Fotoğraf", totalPhotos.toString())
         DetailRow(Icons.Default.Star, "Ortalama Puan", String.format("%.1f", averageRating))
         DetailRow(Icons.Default.Favorite, "En Çok Tercih Edilen", favoriteType)
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Yedekleme ve Geri Yükleme Bölümü
+        Text("Veri Yönetimi", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            FilledTonalButton(
+                onClick = { exportLauncher.launch("last_market_bender_backup.json") },
+                modifier = Modifier.weight(1f),
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Dışa Aktar")
+            }
+            
+            FilledTonalButton(
+                onClick = { importLauncher.launch(arrayOf("application/json")) },
+                modifier = Modifier.weight(1f),
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("İçe Aktar")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Çevrimdışı İpucu
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f)),
+            shape = MaterialTheme.shapes.large
+        ) {
+            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "İpucu: Haritada gezindiğiniz yerler otomatik olarak önbelleğe alınır. İnternet varken haritayı incelemek, çevrimdışı kullanım kalitesini artırır.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(32.dp))
     }

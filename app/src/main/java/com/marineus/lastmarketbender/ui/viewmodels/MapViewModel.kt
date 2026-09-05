@@ -3,6 +3,14 @@ package com.marineus.lastmarketbender.ui.viewmodels
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -23,6 +31,7 @@ import java.io.File
 import java.io.FileOutputStream
 import javax.inject.Inject
 import androidx.core.content.edit
+import androidx.core.content.ContextCompat
 
 @HiltViewModel
 class MapViewModel @Inject constructor(
@@ -35,6 +44,32 @@ class MapViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = emptyList()
     )
+
+    var isOnline by mutableStateOf(checkInitialNetwork())
+        private set
+
+    private fun checkInitialNetwork(): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    init {
+        observeNetwork()
+    }
+
+    private fun observeNetwork() {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        
+        connectivityManager.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) { isOnline = true }
+            override fun onLost(network: Network) { isOnline = false }
+        })
+    }
 
     var locationPermissionGranted by mutableStateOf(false)
         private set
@@ -124,6 +159,31 @@ class MapViewModel @Inject constructor(
                     if (file.exists()) file.delete()
                 }
                 repository.delete(pin)
+            }
+        }
+    }
+
+    fun exportDataToJson(): String {
+        return Gson().toJson(pins.value)
+    }
+
+    fun importDataFromJson(uri: Uri, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val reader = BufferedReader(InputStreamReader(inputStream))
+                val jsonString = reader.use { it.readText() }
+                
+                val pinListType = object : TypeToken<List<MarketPin>>() {}.type
+                val importedPins: List<MarketPin> = Gson().fromJson(jsonString, pinListType)
+                
+                importedPins.forEach { pin ->
+                    // Reset ID to avoid conflicts and treat as new entries
+                    repository.insert(pin.copy(id = 0))
+                }
+                onSuccess()
+            } catch (e: Exception) {
+                onError(e.message ?: "Bilinmeyen bir hata oluştu")
             }
         }
     }

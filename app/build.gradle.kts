@@ -81,6 +81,7 @@ dependencies {
     implementation(libs.places)
     implementation(libs.maps.compose)
     implementation(libs.coil.compose)
+    implementation(libs.gson)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
