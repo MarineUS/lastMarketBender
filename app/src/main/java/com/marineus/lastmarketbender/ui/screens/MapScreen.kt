@@ -70,8 +70,11 @@ fun MapScreen(viewModel: MapViewModel) {
 
     val sheetState = rememberModalBottomSheetState()
     val listSheetState = rememberModalBottomSheetState()
+    val statsSheetState = rememberModalBottomSheetState()
+    
     var showSheet by remember { mutableStateOf(false) }
     var showListSheet by remember { mutableStateOf(false) }
+    var showStatsSheet by remember { mutableStateOf(false) }
     var selectedPinId by remember { mutableStateOf<Int?>(null) }
     
     val selectedPin = remember(selectedPinId, pins) {
@@ -364,6 +367,32 @@ fun MapScreen(viewModel: MapViewModel) {
                     onClose = { showListSheet = false }
                 )
             }
+        }
+
+        if (showStatsSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showStatsSheet = false },
+                sheetState = statsSheetState
+            ) {
+                DashboardContent(
+                    pins = pins,
+                    onClose = { showStatsSheet = false }
+                )
+            }
+        }
+
+        // Dashboard Button (Top Right)
+        FloatingActionButton(
+            onClick = { showStatsSheet = true },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 48.dp, end = 16.dp)
+                .size(48.dp),
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            elevation = FloatingActionButtonDefaults.elevation(4.dp)
+        ) {
+            Icon(Icons.Default.Dashboard, contentDescription = "Dashboard")
         }
 
         // Modern Custom Controls
@@ -1182,6 +1211,129 @@ fun PinListContent(
                 }
             }
         }
+    }
+}
+
+@SuppressLint("DefaultLocale")
+@Composable
+fun DashboardContent(
+    pins: List<MarketPin>,
+    onClose: () -> Unit
+) {
+    val totalPins = pins.size
+    val marketCount = pins.count { it.type == BusinessType.MARKET }
+    val kafeCount = pins.count { it.type == BusinessType.KAFE }
+    val restoranCount = pins.count { it.type == BusinessType.RESTORAN }
+    val magazaCount = pins.count { it.type == BusinessType.MAGAZA }
+    
+    val totalPhotos = pins.sumOf { it.imagePaths.size }
+    val averageRating = if (pins.isNotEmpty()) pins.map { it.rating }.average() else 0.0
+    
+    val favoriteType = if (pins.isNotEmpty()) {
+        pins.groupBy { it.type }.maxBy { it.value.size }.key.name
+    } else "Yok"
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.7f)
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Kullanım İstatistikleri",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, contentDescription = "Kapat")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Ana Kart: Toplam Pin
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            shape = MaterialTheme.shapes.extraLarge
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("Toplam Kaydedilen Yer", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    text = totalPins.toString(),
+                    style = MaterialTheme.typography.displayMedium,
+                    fontWeight = FontWeight.Black
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Türlere Göre Dağılım
+        Text("Kategorilere Göre", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            StatSmallCard(Modifier.weight(1f), "Market", marketCount, Icons.Default.Store, Color(0xFFFF9800))
+            StatSmallCard(Modifier.weight(1f), "Kafe", kafeCount, Icons.Default.Coffee, Color(0xFFFFC107))
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            StatSmallCard(Modifier.weight(1f), "Restoran", restoranCount, Icons.Default.Restaurant, Color(0xFFF44336))
+            StatSmallCard(Modifier.weight(1f), "Mağaza", magazaCount, Icons.Default.ShoppingBag, Color(0xFF2196F3))
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Ek Detaylar
+        Text("Genel Bakış", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        DetailRow(Icons.Default.PhotoLibrary, "Toplam Fotoğraf", totalPhotos.toString())
+        DetailRow(Icons.Default.Star, "Ortalama Puan", String.format("%.1f", averageRating))
+        DetailRow(Icons.Default.Favorite, "En Çok Tercih Edilen", favoriteType)
+
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+@Composable
+fun StatSmallCard(modifier: Modifier, label: String, count: Int, icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(24.dp))
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(text = count.toString(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(text = label, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+fun DetailRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.secondary)
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(text = label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Text(text = value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
     }
 }
 
