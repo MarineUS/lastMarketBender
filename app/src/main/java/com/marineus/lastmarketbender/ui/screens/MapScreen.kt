@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -26,7 +29,6 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,6 +37,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.marineus.lastmarketbender.data.model.BusinessType
@@ -343,6 +347,7 @@ fun MapScreen(viewModel: MapViewModel) {
             ) {
                 PinListContent(
                     pins = pins,
+                    userLocation = viewModel.userLocation,
                     onPinClick = { pin ->
                         showListSheet = false
                         scope.launch {
@@ -469,6 +474,11 @@ fun PinDetailsEditor(
 
     var tempCameraUriString by rememberSaveable { mutableStateOf<String?>(null) }
     var showPhotoOptions by remember { mutableStateOf(false) }
+    
+    var showFullScreenViewer by remember { mutableStateOf(false) }
+    var selectedImageIndex by remember { mutableIntStateOf(0) }
+
+    val displayImages = if (isEditing) imagePaths else pin.imagePaths
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia(),
@@ -695,18 +705,20 @@ fun PinDetailsEditor(
         SectionLabel(icon = Icons.Default.PhotoLibrary, label = "Fotoğraflar")
         Spacer(modifier = Modifier.height(8.dp))
         
-        val displayImages = if (isEditing) imagePaths else pin.imagePaths
-        
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(end = 16.dp)
         ) {
-            items(displayImages) { imageUri ->
+            itemsIndexed(displayImages) { index, imageUri ->
                 Box(
                     modifier = Modifier
                         .size(110.dp)
                         .clip(MaterialTheme.shapes.large)
                         .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable {
+                            selectedImageIndex = index
+                            showFullScreenViewer = true
+                        }
                 ) {
                     AsyncImage(
                         model = imageUri,
@@ -868,26 +880,114 @@ fun PinDetailsEditor(
         }
         Spacer(modifier = Modifier.height(24.dp))
     }
+
+    if (showFullScreenViewer) {
+        FullScreenImageViewer(
+            images = displayImages,
+            initialIndex = selectedImageIndex,
+            onDismiss = { showFullScreenViewer = false }
+        )
+    }
+}
+
+@Composable
+fun FullScreenImageViewer(
+    images: List<String>,
+    initialIndex: Int,
+    onDismiss: () -> Unit
+) {
+    val pagerState = rememberPagerState(initialPage = initialIndex) { images.size }
+    
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                pageSpacing = 16.dp
+            ) { page ->
+                AsyncImage(
+                    model = images[page],
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
+            }
+            
+            // Close Button
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .statusBarsPadding()
+                    .padding(16.dp)
+                    .align(Alignment.TopEnd)
+                    .background(Color.Black.copy(alpha = 0.4f), CircleShape)
+            ) {
+                Icon(Icons.Default.Close, contentDescription = "Kapat", tint = Color.White)
+            }
+            
+            // Indicator
+            Text(
+                text = "${pagerState.currentPage + 1} / ${images.size}",
+                color = Color.White,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 32.dp)
+                    .background(Color.Black.copy(alpha = 0.4f), MaterialTheme.shapes.medium)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
 }
 
 @SuppressLint("DefaultLocale")
 @Composable
 fun PinListContent(
     pins: List<MarketPin>,
+    userLocation: LatLng?,
     onPinClick: (MarketPin) -> Unit,
     onClose: () -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf<BusinessType?>(null) }
-    var sortByRating by remember { mutableStateOf(false) }
+    var sortMode by remember { mutableStateOf(SortMode.NONE) }
 
-    val filteredPins = remember(pins, searchQuery, selectedType, sortByRating) {
+    val pinDistances = remember(pins, userLocation) {
+        pins.associate { pin ->
+            val distance = if (userLocation != null) {
+                val results = FloatArray(1)
+                Location.distanceBetween(
+                    userLocation.latitude, userLocation.longitude,
+                    pin.latitude, pin.longitude,
+                    results
+                )
+                results[0]
+            } else null
+            pin.id to distance
+        }
+    }
+
+    val filteredPins = remember(pins, searchQuery, selectedType, sortMode, pinDistances) {
         pins.filter { pin ->
             val matchesSearch = pin.name.contains(searchQuery, ignoreCase = true)
             val matchesType = selectedType == null || pin.type == selectedType
             matchesSearch && matchesType
         }.let { list ->
-            if (sortByRating) list.sortedByDescending { it.rating } else list
+            when (sortMode) {
+                SortMode.RATING -> list.sortedByDescending { it.rating }
+                SortMode.DISTANCE -> list.sortedBy { pinDistances[it.id] ?: Float.MAX_VALUE }
+                SortMode.NONE -> list
+            }
         }
     }
 
@@ -963,11 +1063,28 @@ fun PinListContent(
             
             Spacer(modifier = Modifier.width(8.dp))
             
+            // Proximity Sort
             FilterChip(
-                selected = sortByRating,
-                onClick = { sortByRating = !sortByRating },
+                selected = sortMode == SortMode.DISTANCE,
+                onClick = { 
+                    sortMode = if (sortMode == SortMode.DISTANCE) SortMode.NONE else SortMode.DISTANCE 
+                },
+                label = { Icon(Icons.Default.NearMe, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                leadingIcon = if (sortMode == SortMode.DISTANCE) {
+                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                } else null
+            )
+
+            Spacer(modifier = Modifier.width(4.dp))
+
+            // Rating Sort
+            FilterChip(
+                selected = sortMode == SortMode.RATING,
+                onClick = { 
+                    sortMode = if (sortMode == SortMode.RATING) SortMode.NONE else SortMode.RATING 
+                },
                 label = { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                leadingIcon = if (sortByRating) {
+                leadingIcon = if (sortMode == SortMode.RATING) {
                     { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
                 } else null
             )
@@ -1023,11 +1140,27 @@ fun PinListContent(
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
-                                Text(
-                                    text = pin.type.name,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.secondary
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = pin.type.name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                    val distance = pinDistances[pin.id]
+                                    if (distance != null) {
+                                        Text(
+                                            text = " • ",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.secondary
+                                        )
+                                        Text(
+                                            text = if (distance < 1000) "${distance.toInt()}m" else String.format("%.1fkm", distance / 1000),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
                             }
                             
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1050,4 +1183,8 @@ fun PinListContent(
             }
         }
     }
+}
+
+enum class SortMode {
+    NONE, RATING, DISTANCE
 }
