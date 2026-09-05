@@ -1,28 +1,40 @@
 package com.marineus.lastmarketbender.ui.viewmodels
 
-import android.app.Application
 import android.content.Context
+import android.content.SharedPreferences
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.core.content.FileProvider
 import com.google.android.gms.maps.model.LatLng
-import com.marineus.lastmarketbender.data.local.AppDatabase
 import com.marineus.lastmarketbender.data.model.BusinessType
 import com.marineus.lastmarketbender.data.model.MarketPin
 import com.marineus.lastmarketbender.data.repository.PinRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
+import javax.inject.Inject
+import androidx.core.content.edit
 
-class MapViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository: PinRepository
-    val pins: StateFlow<List<MarketPin>>
+@HiltViewModel
+class MapViewModel @Inject constructor(
+    private val repository: PinRepository,
+    private val sharedPrefs: SharedPreferences,
+    @ApplicationContext private val context: Context
+) : ViewModel() {
+    val pins: StateFlow<List<MarketPin>> = repository.allPins.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 
     var locationPermissionGranted by mutableStateOf(false)
         private set
@@ -30,19 +42,8 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     var userLocation by mutableStateOf<LatLng?>(null)
         private set
 
-    private val sharedPrefs = application.getSharedPreferences("map_prefs", Context.MODE_PRIVATE)
     var isDarkMode by mutableStateOf(sharedPrefs.getBoolean("is_dark_mode", false))
         private set
-
-    init {
-        val pinDao = AppDatabase.getDatabase(application).pinDao()
-        repository = PinRepository(pinDao)
-        pins = repository.allPins.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-    }
 
     fun updatePermissionStatus(granted: Boolean) {
         locationPermissionGranted = granted
@@ -54,12 +55,11 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleDarkMode() {
         isDarkMode = !isDarkMode
-        sharedPrefs.edit().putBoolean("is_dark_mode", isDarkMode).apply()
+        sharedPrefs.edit { putBoolean("is_dark_mode", isDarkMode) }
     }
 
     fun saveImageToInternalStorage(uri: Uri): String? {
         return try {
-            val context = getApplication<Application>().applicationContext
             val inputStream = context.contentResolver.openInputStream(uri)
             val fileName = "pin_image_${System.currentTimeMillis()}.jpg"
             val file = File(context.filesDir, fileName)
@@ -72,6 +72,24 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
             file.absolutePath
         } catch (e: Exception) {
             e.printStackTrace()
+            null
+        }
+    }
+
+    fun createTempPictureUri(): Uri? {
+        return try {
+            // En garanti yol: External Cache
+            val tempFile = File(context.externalCacheDir, "camera_capture.jpg")
+            if (tempFile.exists()) tempFile.delete()
+            tempFile.createNewFile()
+            
+            FileProvider.getUriForFile(
+                context,
+                "com.marineus.lastmarketbender.fileprovider",
+                tempFile
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("KAMERA_HATASI", "URI Olusturulamadi: ${e.message}", e)
             null
         }
     }

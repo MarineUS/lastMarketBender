@@ -1,4 +1,3 @@
-import org.jetbrains.kotlin.gradle.idea.proto.com.google.protobuf.api
 import java.io.FileInputStream
 import java.util.Properties
 val envFile = rootProject.file(".env")
@@ -11,7 +10,9 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.hilt)
 }
+
 
 android {
     namespace = "com.marineus.lastmarketbender"
@@ -69,6 +70,11 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
+    
+    // Hilt
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.compiler)
+    implementation(libs.androidx.hilt.navigation.compose)
     
     implementation(libs.play.services.maps)
     implementation(libs.play.services.location)

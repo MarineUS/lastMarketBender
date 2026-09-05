@@ -17,11 +17,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -247,17 +252,52 @@ fun MapScreen(viewModel: MapViewModel) {
             }
         ) {
             pins.forEach { pin ->
-                key(pin.id) {
-                    Marker(
-                        state = rememberMarkerState(position = LatLng(pin.latitude, pin.longitude)),
+                key(pin.id, pin.type) {
+                    val markerColor = when (pin.type) {
+                        BusinessType.MARKET -> Color(0xFFFF9800) // Turuncu
+                        BusinessType.KAFE -> Color(0xFFFFC107)   // Sarı/Altın
+                        BusinessType.RESTORAN -> Color(0xFFF44336) // Kırmızı
+                        BusinessType.MAGAZA -> Color(0xFF2196F3)  // Mavi
+                    }
+                    
+                    val markerIcon = when (pin.type) {
+                        BusinessType.MARKET -> Icons.Default.Store
+                        BusinessType.KAFE -> Icons.Default.Coffee
+                        BusinessType.RESTORAN -> Icons.Default.Restaurant
+                        BusinessType.MAGAZA -> Icons.Default.ShoppingBag
+                    }
+
+                    MarkerComposable(
+                        state = rememberUpdatedMarkerState(position = LatLng(pin.latitude, pin.longitude)),
                         title = pin.name,
-                        snippet = "Puan: ${pin.rating}",
                         onClick = {
                             selectedPinId = pin.id
                             showSheet = true
                             true
                         }
-                    )
+                    ) {
+                        // Özel Tasarım Marker
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(Color.White, shape = CircleShape)
+                                .padding(2.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(markerColor, shape = CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = markerIcon,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -287,6 +327,9 @@ fun MapScreen(viewModel: MapViewModel) {
                         },
                         onSaveImage = { uri ->
                             viewModel.saveImageToInternalStorage(uri)
+                        },
+                        onCreateTempUri = {
+                            viewModel.createTempPictureUri()
                         }
                     )
                 }
@@ -331,7 +374,7 @@ fun MapScreen(viewModel: MapViewModel) {
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 modifier = Modifier.size(56.dp)
             ) {
-                Icon(Icons.Default.List, contentDescription = "Pin Listesi")
+                Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Pin Listesi")
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -406,8 +449,10 @@ fun PinDetailsEditor(
     onUpdate: (MarketPin) -> Unit,
     onDelete: () -> Unit,
     onClose: () -> Unit,
-    onSaveImage: (Uri) -> String?
+    onSaveImage: (Uri) -> String?,
+    onCreateTempUri: () -> Uri?
 ) {
+    val context = LocalContext.current
     var isEditing by remember { mutableStateOf(false) }
     
     var name by remember(pin.id, isEditing) { mutableStateOf(pin.name) }
@@ -422,12 +467,46 @@ fun PinDetailsEditor(
     var cuisineType by remember(pin.id, isEditing) { mutableStateOf(pin.cuisineType) }
     var productCategory by remember(pin.id, isEditing) { mutableStateOf(pin.productCategory) }
 
+    var tempCameraUriString by rememberSaveable { mutableStateOf<String?>(null) }
+    var showPhotoOptions by remember { mutableStateOf(false) }
+
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia(),
         onResult = { uris ->
             if (uris.isNotEmpty()) {
                 val internalPaths = uris.mapNotNull { onSaveImage(it) }
                 imagePaths = imagePaths + internalPaths
+            }
+        }
+    )
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+        onResult = { success ->
+            if (success) {
+                tempCameraUriString?.let { uriStr ->
+                    val uri = Uri.parse(uriStr)
+                    onSaveImage(uri)?.let { path ->
+                        imagePaths = imagePaths + path
+                    }
+                }
+            }
+        }
+    )
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted ->
+            if (isGranted) {
+                val uri = onCreateTempUri()
+                if (uri != null) {
+                    tempCameraUriString = uri.toString()
+                    cameraLauncher.launch(uri)
+                } else {
+                    Toast.makeText(context, "Hata: Kamera dosyası hazırlanamadı.", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                Toast.makeText(context, "Kamera izni reddedildi.", Toast.LENGTH_SHORT).show()
             }
         }
     )
@@ -552,7 +631,7 @@ fun PinDetailsEditor(
                         singleLine = true
                     )
                 } else {
-                    Text(if (pin.cuisineType.isNotBlank()) pin.cuisineType else "Belirtilmemiş")
+                    Text(pin.cuisineType.ifBlank { "Belirtilmemiş" })
                 }
             }
             BusinessType.MAGAZA -> {
@@ -566,7 +645,7 @@ fun PinDetailsEditor(
                         singleLine = true
                     )
                 } else {
-                    Text(if (pin.productCategory.isNotBlank()) pin.productCategory else "Belirtilmemiş")
+                    Text(pin.productCategory.ifBlank { "Belirtilmemiş" })
                 }
             }
         }
@@ -602,7 +681,7 @@ fun PinDetailsEditor(
                 shape = MaterialTheme.shapes.medium
             ) {
                 Text(
-                    text = if (pin.description.isNotBlank()) pin.description else "Açıklama yok.",
+                    text = pin.description.ifBlank { "Açıklama yok." },
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(12.dp),
                     color = if (pin.description.isNotBlank()) MaterialTheme.colorScheme.onSurface else Color.Gray
@@ -635,6 +714,23 @@ fun PinDetailsEditor(
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
                     )
+                    if (isEditing) {
+                        IconButton(
+                            onClick = { imagePaths = imagePaths.filter { it != imageUri } },
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(4.dp)
+                                .size(24.dp)
+                                .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Fotoğrafı Kaldır",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
                 }
             }
             if (isEditing) {
@@ -644,11 +740,7 @@ fun PinDetailsEditor(
                             .size(110.dp)
                             .clip(MaterialTheme.shapes.large)
                             .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
-                            .clickable { 
-                                photoPickerLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                )
-                            },
+                            .clickable { showPhotoOptions = true },
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -666,6 +758,47 @@ fun PinDetailsEditor(
                     }
                 }
             }
+        }
+
+        if (showPhotoOptions) {
+            AlertDialog(
+                onDismissRequest = { showPhotoOptions = false },
+                title = { Text("Fotoğraf Ekle") },
+                text = { Text("Fotoğrafı nereden eklemek istersiniz?") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showPhotoOptions = false
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    }) {
+                        Text("Galeri")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showPhotoOptions = false
+                        val hasCameraPermission = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.CAMERA
+                        ) == PackageManager.PERMISSION_GRANTED
+                        
+                        if (hasCameraPermission) {
+                            val uri = onCreateTempUri()
+                            if (uri != null) {
+                                tempCameraUriString = uri.toString()
+                                cameraLauncher.launch(uri)
+                            } else {
+                                Toast.makeText(context, "Hata: Kamera dosyası hazırlanamadı.", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                        }
+                    }) {
+                        Text("Kamera")
+                    }
+                }
+            )
         }
 
         Spacer(modifier = Modifier.height(32.dp))
@@ -737,6 +870,7 @@ fun PinDetailsEditor(
     }
 }
 
+@SuppressLint("DefaultLocale")
 @Composable
 fun PinListContent(
     pins: List<MarketPin>,
@@ -832,7 +966,7 @@ fun PinListContent(
             FilterChip(
                 selected = sortByRating,
                 onClick = { sortByRating = !sortByRating },
-                label = { Icon(Icons.Default.Sort, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                label = { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null, modifier = Modifier.size(18.dp)) },
                 leadingIcon = if (sortByRating) {
                     { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
                 } else null
