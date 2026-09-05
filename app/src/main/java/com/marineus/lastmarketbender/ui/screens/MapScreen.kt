@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.location.Location
 import android.net.Uri
+import android.os.Looper
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -12,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -30,9 +32,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
+import com.marineus.lastmarketbender.data.model.BusinessType
 import com.marineus.lastmarketbender.data.model.MarketPin
+import com.marineus.lastmarketbender.ui.components.RatingBar
+import com.marineus.lastmarketbender.ui.components.SectionLabel
 import com.marineus.lastmarketbender.ui.viewmodels.MapViewModel
-import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.*
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
@@ -55,7 +60,9 @@ fun MapScreen(viewModel: MapViewModel) {
     }
 
     val sheetState = rememberModalBottomSheetState()
+    val listSheetState = rememberModalBottomSheetState()
     var showSheet by remember { mutableStateOf(false) }
+    var showListSheet by remember { mutableStateOf(false) }
     var selectedPinId by remember { mutableStateOf<Int?>(null) }
     
     val selectedPin = remember(selectedPinId, pins) {
@@ -178,17 +185,38 @@ fun MapScreen(viewModel: MapViewModel) {
         viewModel.updatePermissionStatus(isGranted)
     }
 
-    LaunchedEffect(viewModel.locationPermissionGranted) {
-        if (viewModel.locationPermissionGranted) {
-            fusedLocationClient.lastLocation.addOnSuccessListener { location ->
-                location?.let {
-                    val latLng = LatLng(it.latitude, it.longitude)
+    // Location Tracking Logic
+    DisposableEffect(viewModel.locationPermissionGranted) {
+        val locationCallback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                result.lastLocation?.let { location ->
+                    val latLng = LatLng(location.latitude, location.longitude)
                     viewModel.updateUserLocation(latLng)
-                    cameraPositionState.move(CameraUpdateFactory.newLatLngZoom(latLng, 15f))
+                    
+                    // Initial camera focus if needed
+                    if (cameraPositionState.position.target == LatLng(0.0, 0.0)) {
+                        cameraPositionState.move(CameraUpdateFactory.newLatLngZoom(latLng, 15f))
+                    }
                 }
             }
+        }
+
+        if (viewModel.locationPermissionGranted) {
+            val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000) // 5 saniyede bir
+                .setMinUpdateIntervalMillis(2000) // En az 2 saniye
+                .build()
+
+            fusedLocationClient.requestLocationUpdates(
+                locationRequest,
+                locationCallback,
+                Looper.getMainLooper()
+            )
         } else {
             permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
+        }
+
+        onDispose {
+            fusedLocationClient.removeLocationUpdates(locationCallback)
         }
     }
 
@@ -265,6 +293,31 @@ fun MapScreen(viewModel: MapViewModel) {
             }
         }
 
+        if (showListSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showListSheet = false },
+                sheetState = listSheetState
+            ) {
+                PinListContent(
+                    pins = pins,
+                    onPinClick = { pin ->
+                        showListSheet = false
+                        scope.launch {
+                            cameraPositionState.animate(
+                                CameraUpdateFactory.newLatLngZoom(
+                                    LatLng(pin.latitude, pin.longitude), 
+                                    17f
+                                )
+                            )
+                            selectedPinId = pin.id
+                            showSheet = true
+                        }
+                    },
+                    onClose = { showListSheet = false }
+                )
+            }
+        }
+
         // Modern Custom Controls
         Column(
             modifier = Modifier
@@ -272,6 +325,17 @@ fun MapScreen(viewModel: MapViewModel) {
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            FloatingActionButton(
+                onClick = { showListSheet = true },
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(56.dp)
+            ) {
+                Icon(Icons.Default.List, contentDescription = "Pin Listesi")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             FloatingActionButton(
                 onClick = {
                     if (viewModel.locationPermissionGranted) {
@@ -347,9 +411,16 @@ fun PinDetailsEditor(
     var isEditing by remember { mutableStateOf(false) }
     
     var name by remember(pin.id, isEditing) { mutableStateOf(pin.name) }
+    var type by remember(pin.id, isEditing) { mutableStateOf(pin.type) }
     var description by remember(pin.id, isEditing) { mutableStateOf(pin.description) }
     var rating by remember(pin.id, isEditing) { mutableFloatStateOf(pin.rating) }
     var imagePaths by remember(pin.id, isEditing) { mutableStateOf(pin.imagePaths) }
+
+    // Type-specific states
+    var priceLevel by remember(pin.id, isEditing) { mutableIntStateOf(pin.priceLevel) }
+    var hasWiFi by remember(pin.id, isEditing) { mutableStateOf(pin.hasWiFi) }
+    var cuisineType by remember(pin.id, isEditing) { mutableStateOf(pin.cuisineType) }
+    var productCategory by remember(pin.id, isEditing) { mutableStateOf(pin.productCategory) }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia(),
@@ -374,7 +445,7 @@ fun PinDetailsEditor(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = if (isEditing) "Market Düzenle" else "Market Detayları",
+                text = if (isEditing) "Düzenle" else "Detaylar",
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold
@@ -388,22 +459,116 @@ fun PinDetailsEditor(
         
         HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), thickness = 0.5.dp)
 
+        // Type Selection Section
+        SectionLabel(icon = Icons.Default.Category, label = "İşletme Türü")
+        if (isEditing) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                BusinessType.entries.forEach { businessType ->
+                    FilterChip(
+                        selected = type == businessType,
+                        onClick = { type = businessType },
+                        label = { Text(businessType.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        } else {
+            Badge(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.padding(vertical = 4.dp)
+            ) {
+                Text(
+                    text = type.name,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         // Name Section
         if (isEditing) {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text("Market Adı") },
+                label = { Text("İşletme Adı") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 shape = MaterialTheme.shapes.medium
             )
         } else {
             Text(
-                text = name,
+                text = pin.name,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.ExtraBold
             )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Dynamic Type-Specific Fields
+        when (if (isEditing) type else pin.type) {
+            BusinessType.MARKET -> {
+                SectionLabel(icon = Icons.Default.Payments, label = "Fiyat Seviyesi")
+                if (isEditing) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        (1..3).forEach { level ->
+                            FilterChip(
+                                selected = priceLevel == level,
+                                onClick = { priceLevel = level },
+                                label = { Text("$".repeat(level)) }
+                            )
+                        }
+                    }
+                } else {
+                    Text("$".repeat(pin.priceLevel.coerceAtLeast(1)), style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+            BusinessType.KAFE -> {
+                SectionLabel(icon = Icons.Default.Wifi, label = "İnternet")
+                if (isEditing) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("WiFi Var mı?")
+                        Spacer(Modifier.weight(1f))
+                        Switch(checked = hasWiFi, onCheckedChange = { hasWiFi = it })
+                    }
+                } else {
+                    Text(if (pin.hasWiFi) "WiFi Mevcut ✅" else "WiFi Yok ❌")
+                }
+            }
+            BusinessType.RESTORAN -> {
+                SectionLabel(icon = Icons.Default.Restaurant, label = "Mutfak Türü")
+                if (isEditing) {
+                    OutlinedTextField(
+                        value = cuisineType,
+                        onValueChange = { cuisineType = it },
+                        placeholder = { Text("Örn: İtalyan, Kebap...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                } else {
+                    Text(if (pin.cuisineType.isNotBlank()) pin.cuisineType else "Belirtilmemiş")
+                }
+            }
+            BusinessType.MAGAZA -> {
+                SectionLabel(icon = Icons.Default.ShoppingBag, label = "Kategori")
+                if (isEditing) {
+                    OutlinedTextField(
+                        value = productCategory,
+                        onValueChange = { productCategory = it },
+                        placeholder = { Text("Örn: Giyim, Kitap...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                } else {
+                    Text(if (pin.productCategory.isNotBlank()) pin.productCategory else "Belirtilmemiş")
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -425,7 +590,7 @@ fun PinDetailsEditor(
             OutlinedTextField(
                 value = description,
                 onValueChange = { description = it },
-                placeholder = { Text("Fikirlerinizi buraya yazın...") },
+                placeholder = { Text("Notlarınız...") },
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 minLines = 3,
                 shape = MaterialTheme.shapes.medium
@@ -437,7 +602,7 @@ fun PinDetailsEditor(
                 shape = MaterialTheme.shapes.medium
             ) {
                 Text(
-                    text = if (pin.description.isNotBlank()) pin.description else "Açıklama eklenmemiş.",
+                    text = if (pin.description.isNotBlank()) pin.description else "Açıklama yok.",
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(12.dp),
                     color = if (pin.description.isNotBlank()) MaterialTheme.colorScheme.onSurface else Color.Gray
@@ -503,15 +668,6 @@ fun PinDetailsEditor(
             }
         }
 
-        if (!isEditing && displayImages.isEmpty()) {
-            Text(
-                text = "Henüz fotoğraf eklenmemiş.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray,
-                modifier = Modifier.padding(start = 4.dp)
-            )
-        }
-
         Spacer(modifier = Modifier.height(32.dp))
 
         // Buttons Section
@@ -531,9 +687,14 @@ fun PinDetailsEditor(
                     onClick = {
                         onUpdate(pin.copy(
                             name = name,
+                            type = type,
                             description = description,
                             rating = rating,
-                            imagePaths = imagePaths
+                            imagePaths = imagePaths,
+                            priceLevel = priceLevel,
+                            hasWiFi = hasWiFi,
+                            cuisineType = cuisineType,
+                            productCategory = productCategory
                         ))
                         isEditing = false
                     },
@@ -577,45 +738,182 @@ fun PinDetailsEditor(
 }
 
 @Composable
-fun SectionLabel(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(16.dp),
-            tint = MaterialTheme.colorScheme.secondary
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.secondary,
-            fontWeight = FontWeight.Medium
-        )
-    }
-}
-
-@Composable
-fun RatingBar(
-    rating: Float,
-    onRatingChange: (Float) -> Unit,
-    modifier: Modifier = Modifier,
-    stars: Int = 5,
-    clickable: Boolean = true
+fun PinListContent(
+    pins: List<MarketPin>,
+    onPinClick: (MarketPin) -> Unit,
+    onClose: () -> Unit
 ) {
-    Row(modifier = modifier) {
-        for (i in 1..stars) {
-            Icon(
-                imageVector = if (i <= rating) Icons.Default.Star else Icons.Default.StarBorder,
-                contentDescription = null,
-                tint = if (i <= rating) Color(0xFFFFC107) else Color.Gray,
-                modifier = Modifier
-                    .size(32.dp)
-                    .then(
-                        if (clickable) Modifier.clickable { onRatingChange(i.toFloat()) }
-                        else Modifier
-                    )
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedType by remember { mutableStateOf<BusinessType?>(null) }
+    var sortByRating by remember { mutableStateOf(false) }
+
+    val filteredPins = remember(pins, searchQuery, selectedType, sortByRating) {
+        pins.filter { pin ->
+            val matchesSearch = pin.name.contains(searchQuery, ignoreCase = true)
+            val matchesType = selectedType == null || pin.type == selectedType
+            matchesSearch && matchesType
+        }.let { list ->
+            if (sortByRating) list.sortedByDescending { it.rating } else list
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.8f)
+            .padding(16.dp)
+    ) {
+        // Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Kayıtlı Yerler",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
             )
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, contentDescription = "Kapat")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Search Bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("İsimle ara...") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { searchQuery = "" }) {
+                        Icon(Icons.Default.Clear, contentDescription = "Temizle")
+                    }
+                }
+            },
+            singleLine = true,
+            shape = MaterialTheme.shapes.medium
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Filters and Sort Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            LazyRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    FilterChip(
+                        selected = selectedType == null,
+                        onClick = { selectedType = null },
+                        label = { Text("Tümü") }
+                    )
+                }
+                items(BusinessType.entries) { type ->
+                    FilterChip(
+                        selected = selectedType == type,
+                        onClick = { selectedType = type },
+                        label = { Text(type.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.width(8.dp))
+            
+            FilterChip(
+                selected = sortByRating,
+                onClick = { sortByRating = !sortByRating },
+                label = { Icon(Icons.Default.Sort, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                leadingIcon = if (sortByRating) {
+                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                } else null
+            )
+        }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+        if (filteredPins.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = if (pins.isEmpty()) "Henüz bir yer eklenmemiş." else "Sonuç bulunamadı.",
+                    color = Color.Gray
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(filteredPins) { pin ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPinClick(pin) },
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        ),
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .padding(12.dp)
+                                .fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = when (pin.type) {
+                                    BusinessType.MARKET -> Icons.Default.Store
+                                    BusinessType.KAFE -> Icons.Default.Coffee
+                                    BusinessType.RESTORAN -> Icons.Default.Restaurant
+                                    BusinessType.MAGAZA -> Icons.Default.ShoppingBag
+                                },
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(32.dp)
+                            )
+                            
+                            Spacer(modifier = Modifier.width(16.dp))
+                            
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = pin.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = pin.type.name,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                            
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.Star,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFFC107),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = String.format("%.1f", pin.rating),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

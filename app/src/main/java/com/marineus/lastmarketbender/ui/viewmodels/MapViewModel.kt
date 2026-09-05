@@ -10,6 +10,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.maps.model.LatLng
 import com.marineus.lastmarketbender.data.local.AppDatabase
+import com.marineus.lastmarketbender.data.model.BusinessType
 import com.marineus.lastmarketbender.data.model.MarketPin
 import com.marineus.lastmarketbender.data.repository.PinRepository
 import kotlinx.coroutines.flow.SharingStarted
@@ -79,7 +80,8 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.insert(
                 MarketPin(
-                    name = "Yeni Market",
+                    name = "Yeni İşletme",
+                    type = BusinessType.MARKET,
                     rating = 0f,
                     description = "",
                     latitude = latLng.latitude,
@@ -98,6 +100,11 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     fun deletePinById(id: Int) {
         viewModelScope.launch {
             pins.value.find { it.id == id }?.let { pin ->
+                // Delete associated images from storage
+                pin.imagePaths.forEach { path ->
+                    val file = File(path)
+                    if (file.exists()) file.delete()
+                }
                 repository.delete(pin)
             }
         }
