@@ -23,6 +23,5 @@ data class MarketPin(
     val priceLevel: Int = 0, // 1: Ucuz, 2: Orta, 3: Pahalı
     val hasWiFi: Boolean = false,
     val cuisineType: String = "",
-    val atmosphere: String = "",
     val productCategory: String = "" // Giyim, Teknoloji vb.
 )

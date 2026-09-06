@@ -2,6 +2,9 @@ package com.marineus.lastmarketbender.di
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.marineus.lastmarketbender.util.ConnectivityManagerNetworkMonitor
+import com.marineus.lastmarketbender.util.NetworkMonitor
+import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -11,11 +14,19 @@ import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
-object AppModule {
+abstract class AppModule {
 
-    @Provides
+    @Binds
     @Singleton
-    fun provideSharedPreferences(@ApplicationContext context: Context): SharedPreferences {
-        return context.getSharedPreferences("map_prefs", Context.MODE_PRIVATE)
+    abstract fun bindNetworkMonitor(
+        networkMonitor: ConnectivityManagerNetworkMonitor
+    ): NetworkMonitor
+
+    companion object {
+        @Provides
+        @Singleton
+        fun provideSharedPreferences(@ApplicationContext context: Context): SharedPreferences {
+            return context.getSharedPreferences("map_prefs", Context.MODE_PRIVATE)
+        }
     }
 }

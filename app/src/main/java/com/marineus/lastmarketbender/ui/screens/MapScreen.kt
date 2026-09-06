@@ -54,6 +54,7 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.maps.android.compose.*
 import kotlinx.coroutines.launch
+import androidx.core.net.toUri
 
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("MissingPermission")
@@ -546,7 +547,7 @@ fun PinDetailsEditor(
         onResult = { success ->
             if (success) {
                 tempCameraUriString?.let { uriStr ->
-                    val uri = Uri.parse(uriStr)
+                    val uri = uriStr.toUri()
                     onSaveImage(uri)?.let { path ->
                         imagePaths = imagePaths + path
                     }
