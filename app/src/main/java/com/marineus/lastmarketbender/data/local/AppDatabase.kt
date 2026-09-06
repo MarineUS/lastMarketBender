@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.marineus.lastmarketbender.data.model.MarketPin
 
-@Database(entities = [MarketPin::class], version = 2, exportSchema = false)
+@Database(entities = [MarketPin::class], version = 3, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun pinDao(): PinDao

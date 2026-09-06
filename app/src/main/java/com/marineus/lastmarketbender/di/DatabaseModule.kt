@@ -23,7 +23,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "market_database"
         )
-            .fallbackToDestructiveMigration(false)
+            .fallbackToDestructiveMigration(true)
         .build()
     }
 
